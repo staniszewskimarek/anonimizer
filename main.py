@@ -2,11 +2,13 @@ import io
 import os
 import httpx
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse, Response
 from docx import Document
 
-from anonymizer import anonymize_text
+from anonymizer import anonymize_text, DEFAULT_MODEL
+
+OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 app = FastAPI(title="Anonimizer PII")
 
@@ -18,8 +20,22 @@ def index():
     return FileResponse(os.path.join(BASE_DIR, "index.html"), media_type="text/html")
 
 
+@app.get("/models")
+async def get_models():
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(OLLAMA_TAGS_URL)
+            response.raise_for_status()
+        return response.json()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Nie można pobrać listy modeli z Ollamy.")
+
+
 @app.post("/anonymize")
-async def anonymize(file: UploadFile = File(...)):
+async def anonymize(
+    file: UploadFile = File(...),
+    model: str = Form(DEFAULT_MODEL),
+):
     filename = file.filename or "output"
     ext = os.path.splitext(filename)[1].lower()
 
@@ -31,7 +47,7 @@ async def anonymize(file: UploadFile = File(...)):
     try:
         if ext == ".txt":
             text = content.decode("utf-8", errors="replace")
-            result_text = anonymize_text(text)
+            result_text = anonymize_text(text, model)
             return Response(
                 content=result_text.encode("utf-8"),
                 media_type="text/plain; charset=utf-8",
@@ -41,11 +57,9 @@ async def anonymize(file: UploadFile = File(...)):
         else:  # .docx
             doc = Document(io.BytesIO(content))
 
-            # Anonymize paragraphs
             for para in doc.paragraphs:
                 if para.text.strip():
-                    anonymized = anonymize_text(para.text)
-                    # Preserve formatting: put full text in the first run, clear the rest
+                    anonymized = anonymize_text(para.text, model)
                     if para.runs:
                         para.runs[0].text = anonymized
                         for run in para.runs[1:]:
@@ -53,13 +67,12 @@ async def anonymize(file: UploadFile = File(...)):
                     else:
                         para.text = anonymized
 
-            # Anonymize tables
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
                             if para.text.strip():
-                                anonymized = anonymize_text(para.text)
+                                anonymized = anonymize_text(para.text, model)
                                 if para.runs:
                                     para.runs[0].text = anonymized
                                     for run in para.runs[1:]:

@@ -1,7 +1,7 @@
 import httpx
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "deepseek-r1:8b"
+DEFAULT_MODEL = "deepseek-r1:8b"
 CHUNK_WORDS = 800
 TIMEOUT = 120.0
 
@@ -16,7 +16,6 @@ SYSTEM_PROMPT = (
 
 
 def _split_into_chunks(text: str, max_words: int = CHUNK_WORDS) -> list[str]:
-    """Split text into chunks of at most max_words words, breaking on paragraph boundaries."""
     paragraphs = text.split("\n")
     chunks: list[str] = []
     current_lines: list[str] = []
@@ -37,10 +36,9 @@ def _split_into_chunks(text: str, max_words: int = CHUNK_WORDS) -> list[str]:
     return chunks or [""]
 
 
-def _call_ollama(chunk: str) -> str:
-    """Send a single chunk to Ollama and return the anonymized text."""
+def _call_ollama(chunk: str, model: str) -> str:
     payload = {
-        "model": MODEL,
+        "model": model,
         "stream": False,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -54,13 +52,12 @@ def _call_ollama(chunk: str) -> str:
     return data["message"]["content"]
 
 
-def anonymize_text(text: str) -> str:
-    """Anonymize all PII in the given text using Bielik via Ollama."""
+def anonymize_text(text: str, model: str = DEFAULT_MODEL) -> str:
     chunks = _split_into_chunks(text)
     anonymized_chunks: list[str] = []
     for chunk in chunks:
         if chunk.strip():
-            anonymized_chunks.append(_call_ollama(chunk))
+            anonymized_chunks.append(_call_ollama(chunk, model))
         else:
             anonymized_chunks.append(chunk)
     return "\n".join(anonymized_chunks)
