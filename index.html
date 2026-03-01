@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anonimizer PII</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f4f6f9;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1a1a2e;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      padding: 2.5rem 3rem;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: .4rem;
+      color: #1a1a2e;
+    }
+
+    .subtitle {
+      font-size: .9rem;
+      color: #666;
+      margin-bottom: 2rem;
+    }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed #b0b8c8;
+      border-radius: 10px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: #4361ee;
+      background: #f0f3ff;
+    }
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+    .drop-icon {
+      font-size: 2.5rem;
+      margin-bottom: .75rem;
+      display: block;
+    }
+    .drop-label {
+      font-size: .95rem;
+      color: #555;
+    }
+    .drop-label strong { color: #4361ee; }
+    .drop-hint {
+      font-size: .8rem;
+      color: #999;
+      margin-top: .4rem;
+    }
+
+    /* Selected file name */
+    .file-name {
+      margin-top: 1rem;
+      font-size: .9rem;
+      color: #333;
+      min-height: 1.2em;
+      text-align: center;
+      word-break: break-all;
+    }
+
+    /* Submit button */
+    .btn {
+      display: block;
+      width: 100%;
+      margin-top: 1.5rem;
+      padding: .85rem;
+      background: #4361ee;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, opacity .2s;
+    }
+    .btn:hover:not(:disabled) { background: #3451d1; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+    /* Progress / spinner */
+    .progress-wrap {
+      margin-top: 1.5rem;
+      display: none;
+      align-items: center;
+      gap: .75rem;
+    }
+    .progress-wrap.visible { display: flex; }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 3px solid #dde2f0;
+      border-top-color: #4361ee;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-text { font-size: .9rem; color: #555; }
+
+    /* Status messages */
+    .msg {
+      margin-top: 1.25rem;
+      padding: .85rem 1rem;
+      border-radius: 8px;
+      font-size: .9rem;
+      display: none;
+    }
+    .msg.visible { display: block; }
+    .msg.success { background: #e6f9ee; color: #1a7a42; border: 1px solid #b2e8c8; }
+    .msg.error   { background: #fff0f0; color: #c0392b; border: 1px solid #f5bebe; }
+
+    footer {
+      margin-top: 2rem;
+      font-size: .75rem;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>Anonimizer PII</h1>
+  <p class="subtitle">Dane przetwarzane lokalnie przez Bielik&nbsp;&amp;&nbsp;Ollama — nic nie wychodzi na zewnątrz.</p>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".txt,.docx" />
+    <span class="drop-icon">&#128196;</span>
+    <div class="drop-label">Przeciągnij plik lub <strong>kliknij, by wybrać</strong></div>
+    <div class="drop-hint">Obsługiwane formaty: TXT, DOCX</div>
+  </div>
+  <div class="file-name" id="fileName"></div>
+
+  <button class="btn" id="submitBtn" disabled>Anonimizuj</button>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="spinner"></div>
+    <span class="progress-text">Przetwarzanie przez Bielik&hellip; (może potrwać kilka minut)</span>
+  </div>
+
+  <div class="msg" id="successMsg"></div>
+  <div class="msg error" id="errorMsg"></div>
+
+  <footer>Model: qooba/bielik-11b-v3.0-instruct &bull; localhost:11434</footer>
+</div>
+
+<script>
+  const dropZone   = document.getElementById('dropZone');
+  const fileInput  = document.getElementById('fileInput');
+  const fileName   = document.getElementById('fileName');
+  const submitBtn  = document.getElementById('submitBtn');
+  const progressWrap = document.getElementById('progressWrap');
+  const successMsg = document.getElementById('successMsg');
+  const errorMsg   = document.getElementById('errorMsg');
+
+  let selectedFile = null;
+
+  function setFile(file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['txt', 'docx'].includes(ext)) {
+      showError('Nieobsługiwany format pliku. Wybierz plik TXT lub DOCX.');
+      return;
+    }
+    selectedFile = file;
+    fileName.textContent = file.name;
+    submitBtn.disabled = false;
+    hideMessages();
+  }
+
+  fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    setFile(e.dataTransfer.files[0]);
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    setLoading(true);
+    hideMessages();
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+      const response = await fetch('/anonymize', { method: 'POST', body: formData });
+
+      if (!response.ok) {
+        let detail = 'Nieznany błąd serwera.';
+        try {
+          const json = await response.json();
+          detail = json.detail || detail;
+        } catch (_) {}
+        throw new Error(detail);
+      }
+
+      const blob = await response.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = selectedFile.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      showSuccess('Gotowe! Plik został pobrany.');
+    } catch (err) {
+      showError(err.message || 'Błąd połączenia z serwerem.');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  function setLoading(on) {
+    submitBtn.disabled = on;
+    progressWrap.classList.toggle('visible', on);
+  }
+
+  function hideMessages() {
+    successMsg.classList.remove('visible');
+    errorMsg.classList.remove('visible');
+  }
+
+  function showSuccess(msg) {
+    successMsg.textContent = msg;
+    successMsg.className = 'msg success visible';
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.add('visible');
+  }
+</script>
+</body>
+</html>
