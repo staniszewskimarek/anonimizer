@@ -1,9 +1,10 @@
 import httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 DEFAULT_MODEL = "deepseek-r1:8b"
-CHUNK_WORDS = 800
-TIMEOUT = 120.0
+CHUNK_WORDS = 250
+TIMEOUT = 300.0
 
 SYSTEM_PROMPT = """\
 Jesteś narzędziem do anonimizacji tekstu. Zastępujesz dane osobowe (PII) placeholderami.
@@ -75,7 +76,7 @@ def _call_ollama(chunk: str, model: str) -> str:
         "stream": False,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": chunk},
+            {"role": "user", "content": f"/no_think\n{chunk}"},
         ],
     }
     with httpx.Client(timeout=TIMEOUT) as client:
@@ -87,10 +88,16 @@ def _call_ollama(chunk: str, model: str) -> str:
 
 def anonymize_text(text: str, model: str = DEFAULT_MODEL) -> str:
     chunks = _split_into_chunks(text)
-    anonymized_chunks: list[str] = []
-    for chunk in chunks:
-        if chunk.strip():
-            anonymized_chunks.append(_call_ollama(chunk, model))
-        else:
-            anonymized_chunks.append(chunk)
-    return "\n".join(anonymized_chunks)
+
+    # Process chunks in parallel (up to 4 at once)
+    results: dict[int, str] = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(_call_ollama, chunk, model): (i, chunk)
+            for i, chunk in enumerate(chunks)
+        }
+        for future in as_completed(futures):
+            i, chunk = futures[future]
+            results[i] = future.result() if chunk.strip() else chunk
+
+    return "\n".join(results[i] for i in sorted(results))
