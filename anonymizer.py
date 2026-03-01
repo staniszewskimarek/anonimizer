@@ -1,7 +1,7 @@
 import httpx
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "qooba/bielik-11b-v3.0-instruct:Q4_K_M"
+MODEL = "deepseek-r1:8b"
 CHUNK_WORDS = 800
 TIMEOUT = 120.0
 
