@@ -1,6 +1,9 @@
 import io
 import os
+import threading
+import webbrowser
 import httpx
+import uvicorn
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -101,3 +104,8 @@ async def anonymize(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Błąd serwera: {exc}")
+
+
+if __name__ == "__main__":
+    threading.Timer(1.0, lambda: webbrowser.open("http://localhost:8000")).start()
+    uvicorn.run("main:app", host="127.0.0.1", port=8000)
