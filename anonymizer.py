@@ -5,14 +5,29 @@ DEFAULT_MODEL = "deepseek-r1:8b"
 CHUNK_WORDS = 800
 TIMEOUT = 120.0
 
-SYSTEM_PROMPT = (
-    "Jesteś asystentem anonimizującym dane osobowe.\n"
-    "Zastąp WSZYSTKIE dane osobowe (PII) odpowiednimi placeholderami.\n"
-    "Użyj: [IMIĘ], [NAZWISKO], [IMIĘ I NAZWISKO], [PESEL], [NIP], [REGON], "
-    "[ADRES], [TELEFON], [EMAIL], [DATA URODZENIA], [NR DOWODU], "
-    "[KONTO BANKOWE], [NR REJESTRACYJNY].\n"
-    "Zwróć TYLKO zmodyfikowany tekst — bez komentarzy, bez wyjaśnień."
-)
+SYSTEM_PROMPT = """\
+Jesteś narzędziem do anonimizacji tekstu. Zastępujesz dane osobowe (PII) placeholderami.
+
+BEZWZGLĘDNE ZASADY:
+1. Zwróć WYŁĄCZNIE przetworzony tekst — nic więcej.
+2. NIE dodawaj żadnych słów od siebie: żadnych nagłówków, wstępów, komentarzy, wyjaśnień, list punktowanych, odmów ani instrukcji.
+3. NIE zaczynaj odpowiedzi od słów takich jak "Oto", "Zmodyfikowany", "Tekst", "Zastąpiłem" itp.
+4. NIE odmawiaj przetwarzania — zawsze zwróć tekst z placeholderami.
+5. Używaj WYŁĄCZNIE tych placeholderów (nie twórz własnych):
+   [IMIĘ], [NAZWISKO], [IMIĘ I NAZWISKO], [PESEL], [NIP], [REGON],
+   [ADRES], [TELEFON], [EMAIL], [DATA URODZENIA], [NR DOWODU],
+   [KONTO BANKOWE], [NR REJESTRACYJNY]
+6. Zachowaj oryginalną strukturę, interpunkcję i formatowanie tekstu.
+7. Fragmenty tekstu niebędące danymi osobowymi przepisz BEZ ZMIAN.
+
+PRZYKŁAD:
+Wejście:
+  Jan Kowalski, PESEL 85010112345, tel. 600 123 456, jan.kowalski@firma.pl
+  Mieszka przy ul. Lipowej 12, Warszawa.
+Wyjście:
+  [IMIĘ I NAZWISKO], PESEL [PESEL], tel. [TELEFON], [EMAIL]
+  Mieszka przy [ADRES].\
+"""
 
 
 def _split_into_chunks(text: str, max_words: int = CHUNK_WORDS) -> list[str]:
@@ -36,6 +51,24 @@ def _split_into_chunks(text: str, max_words: int = CHUNK_WORDS) -> list[str]:
     return chunks or [""]
 
 
+_JUNK_PREFIXES = (
+    "oto zmodyfikowany tekst",
+    "oto tekst",
+    "zmodyfikowany tekst",
+    "przetworzony tekst",
+    "wynik anonimizacji",
+    "oto wynik",
+)
+
+
+def _strip_junk(text: str) -> str:
+    """Remove common model preambles that appear despite instructions."""
+    line0 = text.split("\n")[0].rstrip(": \t").lower()
+    if any(line0.startswith(p) for p in _JUNK_PREFIXES):
+        text = "\n".join(text.split("\n")[1:]).lstrip("\n")
+    return text.strip()
+
+
 def _call_ollama(chunk: str, model: str) -> str:
     payload = {
         "model": model,
@@ -49,7 +82,7 @@ def _call_ollama(chunk: str, model: str) -> str:
         response = client.post(OLLAMA_URL, json=payload)
         response.raise_for_status()
     data = response.json()
-    return data["message"]["content"]
+    return _strip_junk(data["message"]["content"])
 
 
 def anonymize_text(text: str, model: str = DEFAULT_MODEL) -> str:
