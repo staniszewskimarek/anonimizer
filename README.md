@@ -4,6 +4,8 @@ Lokalne narzędzie do anonimizacji danych osobowych (PII) w dokumentach TXT i DO
 
 Używa lokalnych modeli językowych przez [Ollama](https://ollama.com/).
 
+![Anonimizer PII](aninimizer.png)
+
 ---
 
 ## Funkcje
